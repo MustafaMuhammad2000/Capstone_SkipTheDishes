@@ -5,6 +5,9 @@ import CForm from "./CForm";
 import Results from "./Results";
 import Submit from "./Submit";
 import ClearButton from "./ClearButton";
+import Items from "./Items";
+import SaveOrder from "./SaveOrder";
+import ListOrder from "./ListOrders";
 import React, { useState } from "react";
 import {
   Container,
@@ -22,10 +25,14 @@ function App() {
   return (
     <div className="App">
       <ListContextProvider>
+        <Items />
         <CForm />
         <ClearButton />
         <Submit />
+        <SaveOrder />
+        <ListOrder />
       </ListContextProvider>
+      {/* <Results /> */}
     </div>
   );
 }

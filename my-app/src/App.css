@@ -28,10 +28,9 @@
   color: #61dafb;
 }
 
-.custom-btn {
-  background-color: rgb(235, 156, 10);
-  border: none;
-  color: white;
+.customed-btn {
+  background-color: orange;
+  /* color: white; */
   padding: 15px 32px;
   /* text-align: center; */
   text-decoration: none;

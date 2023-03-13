@@ -2,7 +2,7 @@ import React, { useContext, useState } from "react";
 import { ListContext } from "./Context";
 
 const Submit = () => {
-  const { list } = useContext(ListContext);
+  const { order } = useContext(ListContext);
   const [response, setResponse] = useState(null);
 
   const handleSubmit = async () => {
@@ -12,7 +12,7 @@ const Submit = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(list),
+        body: JSON.stringify(order),
       });
 
       const data = await res.json();
