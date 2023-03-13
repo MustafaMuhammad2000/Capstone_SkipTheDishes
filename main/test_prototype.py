@@ -1,15 +1,22 @@
+import re
 import pandas as pd
 import numpy as np
 import math
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from numpy import dot
+from numpy.linalg import norm
 import random
 
 rf = pd.read_csv('./derived_files/Cuisine_Restaraunt.csv')
 restauraunt_profiles = pd.read_csv(
     './derived_files/combined_restaurant_order_profile.csv')
 id_df = pd.read_csv('./derived_files/All_Restauants.csv')
+
+id_df['short_name'] = id_df['short_name'].str.lower()
+restauraunt_profiles = restauraunt_profiles[restauraunt_profiles['short_name'].isin(
+    id_df['short_name'])]
 
 
 cuisine_map = {
@@ -135,20 +142,31 @@ def create_customer_profile(itemlist):
         columns=['customer_id'] + list(customer_profile_df.columns.drop('customer_id')))
 
     cols = customer_profile_df.columns.tolist()
-
     cols = cols[:-54] + sorted(cols[-54:])
 
     customer_profile_df = customer_profile_df.reindex(columns=cols)
-    print(customer_profile_df)
+    print(customer_profile_df.shape)
 
     return customer_profile_df
 
+
+# Cosine Similarity Calculation
+def cosine_similarity(customer_profile, restaurant_profile_list):
+    cos_sims = []
+    norm_a = np.linalg.norm(customer_profile)
+    for vec in restaurant_profile_list:
+        dot_product = np.dot(customer_profile, vec)
+        norm_b = np.linalg.norm(vec)
+        cos_sim = dot_product / (norm_a * norm_b)
+        cos_sims.append(cos_sim)
+    return np.array(cos_sims)
+
+
 # Reccomendating filtering functions
-
-
 def recommend_cosine_sim(customer_vector, restaraunt_profiles, num_recommendations):
     # Calculate cosine similarity between customer and restaraunts, and stores the indicies of the highest similarity
     # restaurants in variable value.
+    print(customer_vector)
     customer_cuisines = customer_vector.iloc[-54:, 1:].to_numpy()
     customer_cuisines = customer_cuisines.reshape(1, -1)
 
@@ -156,11 +174,7 @@ def recommend_cosine_sim(customer_vector, restaraunt_profiles, num_recommendatio
     restaurant_cuisines = restauraunt_profiles.iloc[:, 1:].to_numpy()
     print(restaurant_cuisines.shape)
 
-    customer_norm = np.linalg.norm(customer_cuisines)
-
-    restaurant_norm = np.linalg.norm(restaurant_cuisines, axis=1)
-    similarity = np.dot(customer_cuisines, restaurant_cuisines.T) / \
-        (customer_norm * restaurant_norm)
+    similarity = cosine_similarity(customer_cuisines, restaurant_cuisines)
 
     value = np.argsort(similarity.flatten())[::-1]
     top_X_restaraunts_id = []
@@ -188,11 +202,15 @@ def update_3_top_cuisines(customer_vector, similarity_matrix):
     # Picks two highest customer cuisine preferences and swaps them with similar cuisines found
     # in a similarity matrix. E.g customer likes Chicken 0.25 and Rice 0.2, will swap them out so they
     # could become Fast Food and Lamb.
-    customer_vector_id = customer_vector.iloc[0]
-    customer_cuisines = customer_vector.iloc[-54:]
+    customer_vector_id = customer_vector.iloc[0, 0]
+    customer_cuisines = customer_vector.iloc[-54:, 1:]
     org_sum = str(customer_cuisines.sum())
-    top3 = pd.to_numeric(customer_cuisines, errors='raise').nlargest(3)
-    print(pd.to_numeric(customer_cuisines, errors='raise').nlargest(5))
+
+    customer_cuisines_numeric = customer_cuisines.apply(
+        pd.to_numeric, errors='raise')
+    top3 = customer_cuisines_numeric.sum().nlargest(3)
+    print(top3)
+
     do_not_repeat = top3.index.to_list()
     print(do_not_repeat)
     for cuisine in top3.index.to_list():
@@ -211,11 +229,19 @@ def update_3_top_cuisines(customer_vector, similarity_matrix):
         customer_cuisines[old_cuisine] = updated_old_cuisine_value
         customer_cuisines[similar_cuisine] = updated_similar_cuisine_value
     print("Sums", org_sum, " ", customer_cuisines.sum())
-    top5 = pd.to_numeric(customer_cuisines, errors='raise').nlargest(5)
+
+    customer_cuisines_numeric = customer_cuisines.apply(
+        pd.to_numeric, errors='raise')
+    top5 = customer_cuisines_numeric.sum().nlargest(5)
+
     print(top5)
     customer_id_series = pd.Series({"customer_id": customer_vector_id})
-    final_test_customer = pd.concat([customer_id_series, customer_cuisines])
-    return final_test_customer
+
+    print("This is customer Cuisine")
+    customer_cuisines.insert(0, "customer_id", customer_vector_id)
+    print(customer_cuisines)
+
+    return customer_cuisines
 
 
 def adjust_recommendations_using_skip_score(top_restaraunts, weight):
@@ -244,22 +270,29 @@ def clean_similar_cuisine():
         columns = test.nlargest(8).tail(5)
 #     columns = columns.drop(row.iloc[0])
         similar_cuisines[row.iloc[0]] = columns
+    return similar_cuisines
 
 
 def recommend_pipeline(item_list):
     avoid_restaraunts = []
     similar_cuisines = clean_similar_cuisine()
     customer_profile = create_customer_profile(item_list)
+
     top_restaraunts = recommend_cosine_sim(
         customer_profile, restauraunt_profiles, 5)
+
     new_customer_vector = update_3_top_cuisines(
         customer_profile, similar_cuisines)
+
     top_restaraunts_varied = recommend_cosine_sim(
         new_customer_vector, restauraunt_profiles, 5)
+
     top_restaraunts_adjusted = adjust_recommendations_using_skip_score(
         top_restaraunts, 0.1)
+
     top_restaraunts_varied_adjusted = adjust_recommendations_using_skip_score(
         top_restaraunts_varied, 0.1)
+
     print(top_restaraunts_adjusted[[
           'cosine similarity score', 'adjusted score']])
     print(top_restaraunts_varied_adjusted[[
