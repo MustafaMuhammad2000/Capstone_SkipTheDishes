@@ -8,6 +8,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from numpy import dot
 from numpy.linalg import norm
 import random
+from flask import Flask, jsonify
+import datetime
+import pytz
+import dateutil.parser
 
 rf = pd.read_csv('./derived_files/Cuisine_Restaraunt.csv')
 restauraunt_profiles = pd.read_csv(
@@ -105,37 +109,61 @@ ethnic_or_cultural_items = [
 ]
 
 
-def create_customer_profile(itemlist):
+def get_order_weight(order_date_str):
+    order_date = dateutil.parser.parse(order_date_str)
+    delta = datetime.datetime.now(pytz.utc) - order_date
+    days_since_order = delta.days
+    weight_0to3months = 1
+    weight_3to6months = 0.7
+    weight_6to12months = 0.3
+    weight_12to24months = 0.2
+    if days_since_order < 90:
+        return weight_0to3months
+    elif days_since_order < 180:
+        slope = (weight_3to6months - weight_0to3months) / (180 - 90)
+        return 1.0 + slope * (days_since_order - 90)
+    elif days_since_order < 365:
+        slope = (weight_6to12months - weight_3to6months) / (365 - 180)
+        return 0.7 + slope * (days_since_order - 180)
+    elif days_since_order < 730:
+        slope = (weight_12to24months - weight_6to12months) / (730 - 365)
+        return 0.3 + slope * (days_since_order - 365)
+    else:
+        return 0.1
+
+
+def create_customer_profile(group):
     customer_profile = dict(zip(cuisine_map.keys(), [0] * 80))
     total_filtered = 0
-    items = itemlist.split(", ")
-    #order_date =  row['created_time']
-    #weight = get_order_weight(order_date)
-    any_items_found = False
-    for item in items:
-        lower_item = item.lower()
-        cuisine_identified_item = False
-        for key in cuisine_map:
-            for cuisine in cuisine_map[key]:
-                if cuisine in lower_item:
-                    if key in ethnic_or_cultural_items:
-                        cuisine_identified_item = True
-                    customer_profile[key] += 1
-                    total_filtered += 1
-                    any_items_found = True
-                    break
+
+    total_filtered = 0
+    for index, row in group.iterrows():
+        items = row['items'].split(", ")
+        order_date = row['date']
+        weight = get_order_weight(order_date)
+        any_items_found = False
+        for item in items:
+            lower_item = item.lower()
+            cuisine_identified_item = False
+            for key in cuisine_map:
+                for cuisine in cuisine_map[key]:
+                    if cuisine in lower_item:
+                        if key in ethnic_or_cultural_items:
+                            cuisine_identified_item = True
+                        customer_profile[key] += weight
+                        total_filtered += weight
+                        any_items_found = True
+                        break
+
     map_total_filtered = 0
     for value in customer_profile.values():
         map_total_filtered += value
-
     if math.isclose(total_filtered, map_total_filtered, abs_tol=0.003) and total_filtered != 0:
-        print("yoo44")
-
         for key in customer_profile:
             customer_profile[key] = customer_profile[key]/total_filtered
+        customer_profile['customer_id'] = "Dummy"
 
-        customer_profile['customer_id'] = 'Dummy'
-
+    # Create customer Profile dataframe
     customer_profile_df = pd.DataFrame(customer_profile, index=[0])
 
     customer_profile_df = customer_profile_df.reindex(
@@ -273,6 +301,45 @@ def clean_similar_cuisine():
     return similar_cuisines
 
 
+def convert_to_json(customer_vector, restaurant_vector, adjusted_restaurant_vector):
+    customer_id = customer_vector.iloc[0, 0]
+    customer_cuisines = customer_vector.iloc[-54:, 1:]
+
+    customer_cuisines_numeric = customer_cuisines.apply(
+        pd.to_numeric, errors='raise')
+    top5 = customer_cuisines_numeric.sum().nlargest(5)
+    top5_cuisines = top5.index.tolist()
+    top5_values = top5.values.tolist()
+
+    # Top 5 cuisine for restaurant
+    print("This is restaurant profile")
+    print(restaurant_vector)
+
+    restaurant_cuisines_numeric = restaurant_vector.apply(
+        pd.to_numeric, errors='raise')
+    top_n = 5
+    print("This is Top 5 restaurant")
+    top_cuisine = restaurant_cuisines_numeric.apply(
+        lambda row: row.sort_values(ascending=False).head(top_n), axis=1)
+
+    for i, row in top_cuisine.iterrows():
+        print(f"Top {top_n} cuisine types for row {i}:")
+        for j, value in row.items():
+            print(f"- Cuisine type {j}: {value}")
+        print()
+
+    # Top 5 cuisine for varied restaurant
+
+    data = {
+        'customer_id': customer_id,
+        'top_cuisines': top5_cuisines,
+        'top_cuisine_values': top5_values
+    }
+    print("This is the data")
+    print(data)
+    return jsonify(data)
+
+
 def recommend_pipeline(item_list):
     avoid_restaraunts = []
     similar_cuisines = clean_similar_cuisine()
@@ -297,8 +364,16 @@ def recommend_pipeline(item_list):
           'cosine similarity score', 'adjusted score']])
     print(top_restaraunts_varied_adjusted[[
           'cosine similarity score', 'adjusted score']])
-    intermediate_top_3 = top_restaraunts_adjusted.head(3)
-    intermediate_top_2 = top_restaraunts_varied_adjusted.head(2)
-    final_recommendations = pd.concat([intermediate_top_3, intermediate_top_2])
+
+    # Extracting top 5 cuisines from customer_profile
+
+    intermediate_top_5 = top_restaraunts_adjusted.head(5)
+    intermediate_varied_top_5 = top_restaraunts_varied_adjusted.head(5)
+
+    print("This is restaurant Profile")
+    json_customer = convert_to_json(
+        customer_profile, intermediate_top_5.iloc[:, 2:-2], intermediate_varied_top_5.iloc[:, 2:-2])
+
+    final_recommendations = pd.concat([intermediate_top_5, intermediate_top_5])
     print(final_recommendations.shape)
     return final_recommendations

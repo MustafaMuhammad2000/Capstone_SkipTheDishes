@@ -24,7 +24,10 @@ def get_incomes():
 
 @app.route('/reccomend', methods=['POST'])
 def get_reccomendation():
-    item_list = request.json['item_list']
+    item_list = request.get_json()
     reccomendations = recommend_pipeline(item_list)
     print(reccomendations)
-    return '', 204
+    return reccomendations, 204
+
+# date
+# items
