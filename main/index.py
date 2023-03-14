@@ -27,7 +27,7 @@ def get_reccomendation():
     item_list = request.get_json()
     reccomendations = recommend_pipeline(item_list)
     print(reccomendations)
-    return reccomendations, 204
+    return reccomendations, 200
 
 # date
 # items

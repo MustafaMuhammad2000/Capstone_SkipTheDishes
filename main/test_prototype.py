@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from numpy import dot
 from numpy.linalg import norm
 import random
-from flask import Flask, jsonify
+from flask import Flask, jsonify, json
 import datetime
 import pytz
 import dateutil.parser
@@ -133,11 +133,15 @@ def get_order_weight(order_date_str):
 
 
 def create_customer_profile(group):
+    data = [[group['items'], group['date']]]
+    my_df = pd.DataFrame(data, columns=['items', 'date'])
+    print(my_df)
+
     customer_profile = dict(zip(cuisine_map.keys(), [0] * 80))
     total_filtered = 0
-
     total_filtered = 0
-    for index, row in group.iterrows():
+
+    for index, row in my_df.iterrows():
         items = row['items'].split(", ")
         order_date = row['date']
         weight = get_order_weight(order_date)
@@ -173,7 +177,8 @@ def create_customer_profile(group):
     cols = cols[:-54] + sorted(cols[-54:])
 
     customer_profile_df = customer_profile_df.reindex(columns=cols)
-    print(customer_profile_df.shape)
+    print("This is customer profile")
+    print(customer_profile_df)
 
     return customer_profile_df
 
@@ -194,12 +199,13 @@ def cosine_similarity(customer_profile, restaurant_profile_list):
 def recommend_cosine_sim(customer_vector, restaraunt_profiles, num_recommendations):
     # Calculate cosine similarity between customer and restaraunts, and stores the indicies of the highest similarity
     # restaurants in variable value.
-    print(customer_vector)
     customer_cuisines = customer_vector.iloc[-54:, 1:].to_numpy()
     customer_cuisines = customer_cuisines.reshape(1, -1)
 
-    print(customer_cuisines.shape)
     restaurant_cuisines = restauraunt_profiles.iloc[:, 1:].to_numpy()
+
+    print("This is customer and restaurant vector shape")
+    print(customer_cuisines.shape)
     print(restaurant_cuisines.shape)
 
     similarity = cosine_similarity(customer_cuisines, restaurant_cuisines)
@@ -237,6 +243,7 @@ def update_3_top_cuisines(customer_vector, similarity_matrix):
     customer_cuisines_numeric = customer_cuisines.apply(
         pd.to_numeric, errors='raise')
     top3 = customer_cuisines_numeric.sum().nlargest(3)
+    print("This is customer's top 3 cuisines")
     print(top3)
 
     do_not_repeat = top3.index.to_list()
@@ -265,7 +272,7 @@ def update_3_top_cuisines(customer_vector, similarity_matrix):
     print(top5)
     customer_id_series = pd.Series({"customer_id": customer_vector_id})
 
-    print("This is customer Cuisine")
+    print("This is updated customer Cuisine")
     customer_cuisines.insert(0, "customer_id", customer_vector_id)
     print(customer_cuisines)
 
@@ -305,39 +312,68 @@ def convert_to_json(customer_vector, restaurant_vector, adjusted_restaurant_vect
     customer_id = customer_vector.iloc[0, 0]
     customer_cuisines = customer_vector.iloc[-54:, 1:]
 
-    customer_cuisines_numeric = customer_cuisines.apply(
-        pd.to_numeric, errors='raise')
-    top5 = customer_cuisines_numeric.sum().nlargest(5)
-    top5_cuisines = top5.index.tolist()
-    top5_values = top5.values.tolist()
+    top5_customer = customer_vector.iloc[-54:, 1:].apply(
+        lambda row: row.nlargest(5).index.tolist(), axis=1)
+
+    json_data = {
+        index: {
+            "customer_id": customer_vector.loc[index, "customer_id"],
+            "top_5": {
+                column: customer_vector.loc[index, column] for column in sorted(values, key=lambda x: customer_vector.loc[index, x], reverse=True)[:5]
+            }
+        } for index, values in top5_customer.iteritems()
+    }
+
+    print("This is customer top 5 cuisine")
+
+    customer_json = json.dumps(json_data)
 
     # Top 5 cuisine for restaurant
     print("This is restaurant profile")
     print(restaurant_vector)
-
-    restaurant_cuisines_numeric = restaurant_vector.apply(
-        pd.to_numeric, errors='raise')
-    top_n = 5
-    print("This is Top 5 restaurant")
-    top_cuisine = restaurant_cuisines_numeric.apply(
-        lambda row: row.sort_values(ascending=False).head(top_n), axis=1)
-
-    for i, row in top_cuisine.iterrows():
-        print(f"Top {top_n} cuisine types for row {i}:")
-        for j, value in row.items():
-            print(f"- Cuisine type {j}: {value}")
-        print()
+    top5 = restaurant_vector.iloc[:, 2:-
+                                  2].apply(lambda row: row.nlargest(5).index.tolist(), axis=1)
+    json_data = {
+        index: {
+            "short_name": restaurant_vector.loc[index, "short_name"],
+            "adjusted_score": restaurant_vector.loc[index, "adjusted score"],
+            "cosine_similarity_score": restaurant_vector.loc[index, "cosine similarity score"],
+            "top_5": {
+                column: restaurant_vector.loc[index, column] for column in values
+            }
+        } for index, values in top5.iteritems()
+    }
+    print("Top 5 cuisines for each restaurant")
+    restaurant_json = json.dumps(json_data)
 
     # Top 5 cuisine for varied restaurant
 
-    data = {
-        'customer_id': customer_id,
-        'top_cuisines': top5_cuisines,
-        'top_cuisine_values': top5_values
+    top5 = adjusted_restaurant_vector.iloc[:, 2:-
+                                           2].apply(lambda row: row.nlargest(5).index.tolist(), axis=1)
+    json_data = {
+        index: {
+            "short_name": adjusted_restaurant_vector.loc[index, "short_name"],
+            "adjusted_score": adjusted_restaurant_vector.loc[index, "adjusted score"],
+            "cosine_similarity_score": adjusted_restaurant_vector.loc[index, "cosine similarity score"],
+            "top_5": {
+                column: adjusted_restaurant_vector.loc[index, column] for column in values
+            }
+        } for index, values in top5.iteritems()
     }
-    print("This is the data")
-    print(data)
-    return jsonify(data)
+    print("Top 5 cuisines for each Varied restaurant")
+    varied_restaurant_json = json.dumps(json_data)
+
+    customer_dict = json.loads(customer_json)
+    restaurant_dict = json.loads(restaurant_json)
+    varied_restaurant_dict = json.loads(varied_restaurant_json)
+
+    # Merge the two dictionaries
+    merged_dict = {"Customers": customer_dict, "Restaurants": restaurant_dict,
+                   "Varied_Restuarnts": varied_restaurant_dict}
+
+    # Convert the merged dictionary to JSON
+    merged_json = json.dumps(merged_dict)
+    return merged_json
 
 
 def recommend_pipeline(item_list):
@@ -371,9 +407,7 @@ def recommend_pipeline(item_list):
     intermediate_varied_top_5 = top_restaraunts_varied_adjusted.head(5)
 
     print("This is restaurant Profile")
-    json_customer = convert_to_json(
-        customer_profile, intermediate_top_5.iloc[:, 2:-2], intermediate_varied_top_5.iloc[:, 2:-2])
+    json_data = convert_to_json(
+        customer_profile, intermediate_top_5, intermediate_varied_top_5)
 
-    final_recommendations = pd.concat([intermediate_top_5, intermediate_top_5])
-    print(final_recommendations.shape)
-    return final_recommendations
+    return json_data
